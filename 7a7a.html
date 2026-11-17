@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>3D Shooter Game</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: system-ui, -apple-system, sans-serif; }
+    #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+    #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+    .interactive { pointer-events: auto; }
+    #top-bar { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .hud-card { background: rgba(0,0,0,0.65); backdrop-filter: blur(8px); color: #fff; padding: 8px 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.15); font-size: 14px; font-weight: bold; display: flex; align-items: center; gap: 8px; }
+    #health-container { width: 140px; height: 16px; background: rgba(255,255,255,0.2); border-radius: 8px; overflow: hidden; position: relative; }
+    #health-bar { width: 100%; height: 100%; background: #2ed573; transition: width 0.3s ease, background-color 0.3s ease; }
+    #minimap { width: 80px; height: 80px; background: rgba(0,0,0,0.7); border: 2px solid rgba(255,255,255,0.2); border-radius: 50%; }
+    #joystick-zone { position: absolute; bottom: 30px; left: 30px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; border: 2px solid rgba(255,255,255,0.2); }
+    #joystick-knob { position: absolute; top: 50%; left: 50%; width: 50px; height: 50px; background: rgba(255,255,255,0.5); border-radius: 50%; transform: translate(-50%, -50%); }
+    #fire-btn { position: absolute; bottom: 35px; right: 35px; width: 80px; height: 80px; background: radial-gradient(circle, #ff4757, #ff6b81); border: 3px solid #fff; border-radius: 50%; color: white; font-size: 20px; font-weight: bold; display: flex; justify-content: center; align-items: center; box-shadow: 0 0 15px rgba(255,71,87,0.5); }
+    #fire-btn:active { transform: scale(0.92); }
+    .hud-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; }
+    .screen-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(10px); display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 100; color: white; text-align: center; }
+    .modal-box { background: #1e1e24; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 24px; width: 90%; max-width: 400px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    input, select, button { width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 14px; outline: none; }
+    input, select { background: rgba(255,255,255,0.08); color: white; border: 1px solid rgba(255,255,255,0.2); }
+    button.action-btn { background: #2ed573; color: white; font-weight: bold; cursor: pointer; }
+    button.danger-btn { background: #ff4757; color: white; font-weight: bold; cursor: pointer; }
+    .cmds-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-height: 250px; overflow-y: auto; }
+    .cmd-item { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 8px; border-radius: 6px; font-size: 12px; cursor: pointer; text-align: center; }
+    .cmd-item:hover { background: rgba(255,255,255,0.15); }
+    #toast { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: white; padding: 8px 16px; border-radius: 20px; font-size: 13px; border: 1px solid rgba(255,255,255,0.2); display: none; z-index: 50; }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="ui-layer">
+    <div id="top-bar" class="interactive">
+      <div class="hud-card"><span>❤️</span><div id="health-container"><div id="health-bar"></div></div><span id="hp-val">100</span></div>
+      <div class="hud-card"><span>🎯 Level <span id="level-num">1</span></span><span> | 👾 <span id="enemies-left">0</span></span></div>
+      <div class="hud-card"><span>🔫 <span id="ammo">30</span>/∞</span></div>
+      <button class="hud-btn" id="perspective-btn">المنظور: الأول 🎥</button>
+      <button class="hud-btn" id="code-btn">🔑 الكود</button>
+      <canvas id="minimap"></canvas>
+    </div>
+    <div id="toast"></div>
+    <div id="status" style="position:absolute; bottom:120px; left:50%; transform:translateX(-50%); color:#eccc68; font-weight:bold;"></div>
+    <div id="joystick-zone" class="interactive"><div id="joystick-knob"></div></div>
+    <div id="fire-btn" class="interactive">🔥</div>
+  </div>
+
+  <div id="instructions" class="screen-overlay interactive">
+    <h1>🎮 حرب الأبطال 3D</h1>
+    <p>استخدم الجويستيك للحركة والتصويب باللمس على الشاشة</p>
+    <button class="action-btn" id="start-btn" style="width: 200px; font-size: 18px; margin-top: 15px;">ابدأ اللعبة 🚀</button>
+  </div>
+
+  <div id="game-over-screen" class="screen-overlay interactive" style="display: none;">
+    <h1 style="color: #ff4757; font-size: 40px;">GAME OVER 💀</h1>
+    <p>لقد تم القضاء عليك!</p>
+    <button class="danger-btn" id="restart-btn" style="width: 200px; font-size: 18px; margin-top: 15px;">إعادة اللعب 🔄</button>
+  </div>
+
+  <div id="level-banner" class="screen-overlay" style="display: none; background: rgba(0,0,0,0.6);">
+    <h1 id="level-title" style="font-size: 50px; color: #2ed573;">LEVEL 1</h1>
+  </div>
+
+  <div id="codes-modal" class="screen-overlay interactive" style="display: none;">
+    <div class="modal-box">
+      <h3>🔑 إدخال كود الخاصية</h3>
+      <input type="text" id="code-input" placeholder="أدخل الكود هنا (مثال: CMDS)...">
+      <button class="action-btn" id="submit-code-btn">تفعيل الكود</button>
+      <button class="hud-btn" id="close-code-btn">إغلاق</button>
+    </div>
+  </div>
+
+  <div id="admin-modal" class="screen-overlay interactive" style="display: none;">
+    <div class="modal-box">
+      <h3>👑 لوحة إنشاء الأكواد</h3>
+      <input type="text" id="new-code-name" placeholder="اسم الكود الجديد...">
+      <select id="new-code-type">
+        <option value="health">صحة كاملة ❤️️</option>
+        <option value="ammo">ذخيرة لا نهائية 🔫</option>
+        <option value="level">تخطي للمستوى 🚀</option>
+      </select>
+      <input type="number" id="new-code-val" placeholder="القيمة (مثال: رقم المستوى)" value="1">
+      <button class="action-btn" id="save-code-btn">حفظ الكود</button>
+      <button class="hud-btn" id="close-admin-btn">إغلاق</button>
+    </div>
+  </div>
+
+  <div id="cmds-modal" class="screen-overlay interactive" style="display: none;">
+    <div class="modal-box" style="max-width: 500px;">
+      <h3>⚡ قائمة الأوامر والسحر (CMDS)</h3>
+      <div class="cmds-grid">
+        <div class="cmd-item" onclick="execCmd(1)">🛡️ وضع الخلود</div>
+        <div class="cmd-item" onclick="execCmd(2)">💥 قتل كل الأعداء</div>
+        <div class="cmd-item" onclick="execCmd(3)">🔫 ذخيرة لا نهائية</div>
+        <div class="cmd-item" onclick="execCmd(4)">⚡ سرعة خارقة</div>
+        <div class="cmd-item" onclick="execCmd(5)">🦘 قفز عالي</div>
+        <div class="cmd-item" onclick="execCmd(6)">❤️ زيادة الصحة</div>
+        <div class="cmd-item" onclick="execCmd(7)">👻 وضع الطيران</div>
+        <div class="cmd-item" onclick="execCmd(8)">🎯 التوجيه للعدو</div>
+        <div class="cmd-item" onclick="execCmd(9)">❄️ تجميد الأعداء</div>
+        <div class="cmd-item" onclick="execCmd(10)">👑 حماية الأدمن</div>
+        <div class="cmd-item" onclick="execCmd(11)">🌌 وضع ليلي</div>
+        <div class="cmd-item" onclick="execCmd(12)">🚀 المستوى الأخير</div>
+      </div>
+      <div style="margin-top: 10px;">
+        <input type="text" id="ann-name" placeholder="اسمك..." style="margin-bottom: 5px;">
+        <input type="text" id="ann-msg" placeholder="اكتب إعلان للعبة...">
+        <button class="action-btn" id="send-ann-btn" style="margin-top: 5px;">إرسال إعلان live 📢</button>
+      </div>
+      <button class="hud-btn" id="close-cmds-btn" style="margin-top: 10px;">إغلاق</button>
+    </div>
+  </div>
+
+<script>
+let scene, camera, renderer, clock;
+let playerPos = new THREE.Vector3(0, 1.6, 0);
+let cameraRotation = { yaw: 0, pitch: 0 };
+let playerHealth = 100, ammo = 30, currentLevel = 1;
+let gameStarted = false, isPaused = false, isThirdPerson = false;
+let isGodMode = false, isInfiniteAmmo = false, playerSpeed = 7;
+let isFrozen = false, isReflector = false, isNightMode = false;
+let bots = [], rockets = [], healthZones = [], customCodes = {};
+let moveVector = { x: 0, z: 0 };
+let joyId = null, lookTouchId = null, lastTouchPos = { x: 0, y: 0 };
+let remainingBotsCount = 0, spawnInterval = null, lastHealTime = 0;
+let playerMesh, gunMesh, muzzleFlash;
+let raycaster = new THREE.Raycaster();
+let audioCtx = null;
+
+function initAudio(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)()}
+function playTone(freq,duration,type='square'){if(!audioCtx)return;try{let osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type=type;osc.frequency.value=freq;osc.connect(gain);gain.connect(audioCtx.destination);osc.start();gain.gain.setValueAtTime(.3,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(.01,audioCtx.currentTime+duration);osc.stop(audioCtx.currentTime+duration)}catch(e){}}
+function playGunshotSound(){playTone(150,.1,'sawtooth')}
+function playHitSound(){playTone(300,.08,'sine')}
+function playHurtSound(){playTone(100,.2,'sawtooth')}
+function playHealSound(){playTone(600,.15,'sine')}
+function playReloadSound(){playTone(400,.2,'triangle')}
+
+window.onload=()=>{initScene();setupControls();setupCodeSystem();loadCodes();animate()};
+
+function initScene(){
+  const container=document.getElementById('canvas-container');
+  scene=new THREE.Scene();clock=new THREE.Clock();
+  camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,.1,1000);
+  renderer=new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(window.innerWidth,window.innerHeight);renderer.shadowMap.enabled=true;container.appendChild(renderer.domElement);
+  createPlayerMesh();createGun();applyLevelTheme();
+  window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth,window.innerHeight)})
+}
+function createPlayerMesh(){
+  const geo=new THREE.CylinderGeometry(.4,.4,1.8),mat=new THREE.MeshStandardMaterial({color:0x2ed573});
+  playerMesh=new THREE.Mesh(geo,mat);scene.add(playerMesh);playerMesh.visible=false;
+}
+function createGun(){
+  gunMesh=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.1,.12,.5),new THREE.MeshStandardMaterial({color:0x333333}));
+  const barrel=new THREE.Mesh(new THREE.CylinderGeometry(.02,.02,.3),new THREE.MeshStandardMaterial({color:0x111111}));
+  barrel.rotation.x=Math.PI/2;barrel.position.set(0,.02,-.35);
+  const flashGeo=new THREE.SphereGeometry(.05),flashMat=new THREE.MeshBasicMaterial({color:0xffaa00,transparent:true,opacity:0});
+  muzzleFlash=new THREE.Mesh(flashGeo,flashMat);muzzleFlash.position.set(0,.02,-.5);
+  gunMesh.add(body,barrel,muzzleFlash);gunMesh.position.set(.2,-.2,-.35);camera.add(gunMesh);scene.add(camera);
+}
+function applyLevelTheme(){
+  while(scene.children.length>0)scene.remove(scene.children[0]);
+  scene.add(camera);if(isThirdPerson)scene.add(playerMesh);
+  let bgColor=isNightMode?0x050510:(0x101025+currentLevel*0x080510);
+  scene.background=new THREE.Color(bgColor);scene.fog=new THREE.FogExp2(bgColor,.025);
+  const ambientLight=new THREE.AmbientLight(0xffffff,isNightMode?.2:.6);
+  const dirLight=new THREE.DirectionalLight(0xffffff,isNightMode?.3:.8);dirLight.position.set(20,40,20);scene.add(ambientLight,dirLight);
+  const floorMat=new THREE.MeshStandardMaterial({color:isNightMode?0x111122:0x223344,roughness:.8});
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(100,100),floorMat);floor.rotation.x=-Math.PI/2;scene.add(floor);
+  for(let i=0;i<15;i++){let box=new THREE.Mesh(new THREE.BoxGeometry(3,4,3),new THREE.MeshStandardMaterial({color:0x445566}));box.position.set((Math.random()-.5)*70,2,(Math.random()-.5)*70);scene.add(box)}
+  healthZones=[];
+  for(let i=0;i<2;i++){let zone=new THREE.Mesh(new THREE.CylinderGeometry(2,2,.1),new THREE.MeshBasicMaterial({color:0x2ed573,transparent:true,opacity:.5}));zone.position.set((Math.random()-.5)*60,.05,(Math.random()-.5)*60);scene.add(zone);healthZones.push(zone)}
+}
+function spawnBot(){
+  const botGroup=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.BoxGeometry(.8,1.4,.5),new THREE.MeshStandardMaterial({color:0xff4757}));body.position.y=.7;
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.3),new THREE.MeshStandardMaterial({color:0xff6b81}));head.position.y=1.6;
+  const lArm=new THREE.Mesh(new THREE.BoxGeometry(.2,.8,.2),new THREE.MeshStandardMaterial({color:0xff4757}));lArm.position.set(-.55,.8,0);
+  const rArm=lArm.clone();rArm.position.x=.55;botGroup.add(body,head,lArm,rArm);
+  let angle=Math.random()*Math.PI*2;botGroup.position.set(playerPos.x+Math.cos(angle)*30,0,playerPos.z+Math.sin(angle)*30);
+  botGroup.userData={health:100,animTime:0,lArm,rArm,isDead:false,lastShot:0};bots.push(botGroup);scene.add(botGroup);
+}
+function startBotSpawning(){
+  bots.forEach(b=>scene.remove(b));bots=[];remainingBotsCount=5+currentLevel*3;
+  document.getElementById('enemies-left').innerText=remainingBotsCount;
+  if(spawnInterval)clearInterval(spawnInterval);
+  let spawned=0;
+  spawnInterval=setInterval(()=>{if(spawned<remainingBotsCount&&gameStarted&&!isPaused){spawnBot();spawned++}},1500);
+}
+function killBot(bot){
+  if(bot.userData.isDead)return;bot.userData.isDead=true;remainingBotsCount--;
+  document.getElementById('enemies-left').innerText=remainingBotsCount;bot.position.y=.2;bot.rotation.x=-Math.PI/2;
+  bot.children.forEach(c=>{if(c.material)c.material.color.setHex(0x555555)});playHitSound();
+  if(remainingBotsCount===0)nextLevel();
+}
+function drawMinimap(){
+  const c=document.getElementById('minimap'),ctx=c.getContext('2d');ctx.clearRect(0,0,80,80);
+  ctx.fillStyle='#1e90ff';ctx.beginPath();ctx.arc(40,40,4,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#ff4757';bots.forEach(b=>{if(b.userData.isDead)return;let dx=b.position.x-playerPos.x,dz=b.position.z-playerPos.z;if(Math.hypot(dx,dz)<38){ctx.beginPath();ctx.arc(40+dx,40+dz,3,0,Math.PI*2);ctx.fill()}});
+  ctx.fillStyle='#2ed573';healthZones.forEach(z=>{let dx=z.position.x-playerPos.x,dz=z.position.z-playerPos.z;if(Math.hypot(dx,dz)<38){ctx.beginPath();ctx.arc(40+dx,40+dz,4,0,Math.PI*2);ctx.fill()}});
+}
+function updateHealthUI(){
+  const bar=document.getElementById('health-bar');document.getElementById('hp-val').innerText=isGodMode?'∞':playerHealth;bar.style.width=playerHealth+'%';
+  if(playerHealth<=0)bar.style.backgroundColor='#000000';else if(playerHealth<30)bar.style.backgroundColor='#ff4757';else if(playerHealth<60)bar.style.backgroundColor='#eccc68';else bar.style.backgroundColor='#2ed573'
+}
+function takeDamage(amount){
+  if(playerHealth<=0||isPaused||isGodMode)return;playHurtSound();playerHealth=Math.max(0,playerHealth-amount);updateHealthUI();
+  if(playerHealth<=0){gameStarted=false;if(spawnInterval)clearInterval(spawnInterval);document.getElementById('game-over-screen').style.display='flex'}
+}
+function shoot(){
+  if(isReloading||!gameStarted||isPaused)return;if(!isInfiniteAmmo&&ammo<=0)return autoReload();playGunshotSound();
+  if(!isInfiniteAmmo){ammo--;document.getElementById('ammo').innerText=ammo}
+  gunMesh.position.z=-.28;muzzleFlash.material.opacity=1;setTimeout(()=>{gunMesh.position.z=-.35;muzzleFlash.material.opacity=0},60);
+  if(!isInfiniteAmmo&&ammo===0)autoReload();raycaster.setFromCamera(new THREE.Vector2(0,0),camera);
+  let targets=[];bots.forEach(b=>{if(!b.userData.isDead)targets.push(...b.children)});
+  const hits=raycaster.intersectObjects(targets);
+  if(hits.length){let hitObj=hits[0].object,hitBot=hitObj.parent;if(hitBot&&hitBot.userData&&!hitBot.userData.isDead){playHitSound();hitBot.userData.health-=50;if(hitBot.userData.health<=0)killBot(hitBot)}}
+}
+let isReloading=false;
+function autoReload(){if(isReloading)return;isReloading=true;document.getElementById('status').innerText='جاري التعبئة...';playReloadSound();setTimeout(()=>{ammo=30;document.getElementById('ammo').innerText=ammo;document.getElementById('status').innerText='';isReloading=false},1200)}
+function togglePerspective(){isThirdPerson=!isThirdPerson;document.getElementById('perspective-btn').innerText=isThirdPerson?'المنظور: الثالث 🎥':'المنظور: الأول 🎥';playerMesh.visible=isThirdPerson}
+function jumpToLevel(lvl){currentLevel=Math.min(16,Math.max(1,lvl));applyLevelTheme();if(gameStarted)startBotSpawning();document.getElementById('level-num').innerText=currentLevel}
+function nextLevel(){
+  gameStarted=false;if(spawnInterval)clearInterval(spawnInterval);currentLevel++;
+  if(currentLevel>16){showToast("🎉 مبروك! ختمت اللعبة!","success");return}
+  document.getElementById('level-title').innerText='LEVEL '+currentLevel;document.getElementById('level-banner').style.display='flex';playerHealth=100;updateHealthUI();
+  setTimeout(()=>{document.getElementById('level-banner').style.display='none';applyLevelTheme();startBotSpawning();gameStarted=true},1800)
+}
+function execCmd(id){
+  const cmdsModal=document.getElementById('cmds-modal');
+  switch(id){
+    case 1:isGodMode=!isGodMode;playerHealth=100;updateHealthUI();showToast(isGodMode?'🛡️ وضع الخلود: مفعّل':'❌ معطل');break;
+    case 2:[...bots].forEach(b=>killBot(b));showToast('💥 تم القضاء على الأعداء!');break;
+    case 3:isInfiniteAmmo=!isInfiniteAmmo;ammo=isInfiniteAmmo?999:30;document.getElementById('ammo').innerText=ammo;showToast(isInfiniteAmmo?'🔫 ذخيرة غير محدودة':'🔫 عادية');break;
+    case 4:playerSpeed=playerSpeed===7?20:7;showToast(playerSpeed===20?'⚡ سرعة خارقة':'🏃 سرعة عادية');break;
+    case 5:playerPos.y+=10;showToast('🦘 قفز عالي!');break;
+    case 6:playerHealth=100;updateHealthUI();showToast('❤️ تم استرجاع الصحة');break;
+    case 7:playerPos.y=playerPos.y===1.6?15:1.6;showToast(playerPos.y===15?'👻 طيران مفعّل':'👻 معطل');break;
+    case 8:if(bots.length>0){camera.lookAt(bots[0].position);showToast('🎯 تم التوجيه للعدو')}break;
+    case 9:isFrozen=!isFrozen;showToast(isFrozen?'❄️ تجميد الأعداء':'🔥 إلغاء التجميد');break;
+    case 10:isReflector=!isReflector;showToast(isReflector?'👑 حماية الأدمن مفعّلة':'👑 معطلة');break;
+    case 11:isNightMode=!isNightMode;applyLevelTheme();showToast(isNightMode?'🌌 وضع ليلي':'☀️ نهاري');break;
+    case 12:jumpToLevel(16);showToast('🚀 للمستوى 16');break;
+  }
+  cmdsModal.style.display='none';isPaused=false;
+}
+function showToast(msg){const t=document.getElementById('toast');t.innerText=msg;t.style.display='block';setTimeout(()=>t.style.display='none',2000)}
+function setupControls(){
+  document.getElementById('start-btn').onclick=()=>{initAudio();document.getElementById('instructions').style.display='none';gameStarted=true;startBotSpawning()};
+  document.getElementById('restart-btn').onclick=()=>{document.getElementById('game-over-screen').style.display='none';playerPos.set(0,1.6,0);playerHealth=100;ammo=30;updateHealthUI();currentLevel=1;applyLevelTheme();gameStarted=true;startBotSpawning()};
+  document.getElementById('perspective-btn').onclick=togglePerspective;
+  document.getElementById('fire-btn').addEventListener('touchstart',e=>{e.preventDefault();initAudio();shoot()},{passive:false});
+  document.getElementById('fire-btn').addEventListener('mousedown',e=>{e.preventDefault();initAudio();shoot()});
+  const zone=document.getElementById('joystick-zone'),knob=document.getElementById('joystick-knob');
+  zone.addEventListener('touchstart',e=>{e.preventDefault();if(joyId===null){const t=e.changedTouches[0];joyId=t.identifier;updateJoy(t.clientX,t.clientY)}},{passive:false});
+  zone.addEventListener('touchmove',e=>{e.preventDefault();for(const t of e.changedTouches)if(t.identifier===joyId)updateJoy(t.clientX,t.clientY)},{passive:false});
+  const endJoy=e=>{for(const t of e.changedTouches)if(t.identifier===joyId){joyId=null;moveVector={x:0,z:0};knob.style.transform='translate(-50%,-50%)'}};
+  zone.addEventListener('touchend',endJoy,{passive:false});zone.addEventListener('touchcancel',endJoy,{passive:false});
+  function updateJoy(x,y){const r=zone.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2,dx=x-cx,dy=y-cy,max=35,len=Math.hypot(dx,dy)||1,m=Math.min(max,len),nx=dx/len,ny=dy/len;knob.style.transform=`translate(calc(-50% + ${nx*m}px),calc(-50% + ${ny*m}px))`;moveVector.x=nx;moveVector.z=ny}
+  addEventListener('touchstart',e=>{for(const t of e.changedTouches){if(t.target.closest('#joystick-zone')||t.target.closest('#fire-btn')||t.target.closest('#top-bar')||t.target.closest('.screen-overlay'))continue;if(lookTouchId===null){lookTouchId=t.identifier;lastTouchPos={x:t.clientX,y:t.clientY}}}},{passive:false});
+  addEventListener('touchmove',e=>{for(const t of e.changedTouches)if(t.identifier===lookTouchId){const dx=t.clientX-lastTouchPos.x,dy=t.clientY-lastTouchPos.y;cameraRotation.yaw-=dx*.004;cameraRotation.pitch-=dy*.004;cameraRotation.pitch=Math.max(-1.35,Math.min(1.35,cameraRotation.pitch));lastTouchPos={x:t.clientX,y:t.clientY}}},{passive:false});
+  addEventListener('touchend',e=>{for(const t of e.changedTouches)if(t.identifier===lookTouchId)lookTouchId=null},{passive:false});
+  addEventListener('keydown',e=>{if(e.code==='Space')shoot();if(e.code==='KeyR')autoReload();if(e.code==='KeyW')moveVector.z=-1;if(e.code==='KeyS')moveVector.z=1;if(e.code==='KeyA')moveVector.x=-1;if(e.code==='KeyD')moveVector.x=1});
+  addEventListener('keyup',e=>{if(['KeyW','KeyS'].includes(e.code))moveVector.z=0;if(['KeyA','KeyD'].includes(e.code))moveVector.x=0});
+}
+function setupCodeSystem(){
+  const codeBtn=document.getElementById('code-btn'),modal=document.getElementById('codes-modal'),admin=document.getElementById('admin-modal'),cmdsModal=document.getElementById('cmds-modal'),codeInput=document.getElementById('code-input');
+  codeBtn.onclick=()=>{isPaused=true;modal.style.display='flex';codeInput.focus()};
+  document.getElementById('close-code-btn').onclick=()=>{modal.style.display='none';isPaused=false};
+  document.getElementById('close-admin-btn').onclick=()=>{admin.style.display='none';isPaused=false};
+  document.getElementById('close-cmds-btn').onclick=()=>{cmdsModal.style.display='none';isPaused=false};
+  document.getElementById('submit-code-btn').onclick=()=>{
+    const code=codeInput.value.trim().toUpperCase();if(!code)return;
+    if(code==='CMDS'||code==='/CMDS'){modal.style.display='none';cmdsModal.style.display='flex';return}
+    else if(code==='MAKEMEADMIN'){modal.style.display='none';admin.style.display='flex';return}
+    else{const data=customCodes[code];if(!data){showToast('❌ كود غير صحيح')}else if(data.type==='level'){jumpToLevel(Number(data.value));showToast('✅ تم الانتقال للمستوى '+data.value)}else if(data.type==='health'){playerHealth=100;updateHealthUI();showToast('❤ تم استرجاع الصحة')}else if(data.type==='ammo'){ammo=999;document.getElementById('ammo').innerText=ammo;showToast('🔫 الذخيرة أصبحت 999')}}
+    modal.style.display='none';codeInput.value='';isPaused=false;
+  };
+  document.getElementById('save-code-btn').onclick=()=>{
+    const name=document.getElementById('new-code-name').value.trim().toUpperCase(),type=document.getElementById('new-code-type').value,value=document.getElementById('new-code-val').value;
+    if(!name){showToast('اكتب اسم الكود');return}
+    customCodes[name]={type,value};localStorage.setItem('ahmaaa_custom_codes',JSON.stringify(customCodes));showToast('💾 تم حفظ الكود: '+name);document.getElementById('new-code-name').value='';
+  };
+}
+function loadCodes(){try{customCodes=JSON.parse(localStorage.getItem('ahmaaa_custom_codes')||'{}')}catch(e){customCodes={}}}
+function checkCollisions(pos,radius){pos.x=Math.max(-48,Math.min(48,pos.x));pos.z=Math.max(-48,Math.min(48,pos.z))}
+function animate(){
+  requestAnimationFrame(animate);if(!scene||!camera||!renderer)return;const dt=Math.min(.04,clock.getDelta());
+  if(gameStarted&&!isPaused){
+    const forward=new THREE.Vector3(-Math.sin(cameraRotation.yaw),0,-Math.cos(cameraRotation.yaw)),right=new THREE.Vector3(Math.cos(cameraRotation.yaw),0,-Math.sin(cameraRotation.yaw));
+    const dir=new THREE.Vector3().addScaledVector(right,moveVector.x).addScaledVector(forward,-moveVector.z);
+    if(dir.lengthSq()>0)dir.normalize().multiplyScalar(playerSpeed*dt);playerPos.add(dir);checkCollisions(playerPos,.5);
+    camera.position.copy(playerPos);camera.rotation.set(cameraRotation.pitch,cameraRotation.yaw,0);
+    if(isThirdPerson){playerMesh.position.set(playerPos.x,0,playerPos.z);playerMesh.rotation.y=cameraRotation.yaw;camera.position.y=playerPos.y+2.5;camera.position.x=playerPos.x+Math.sin(cameraRotation.yaw)*5;camera.position.z=playerPos.z+Math.cos(cameraRotation.yaw)*5;camera.lookAt(playerPos.x,1,playerPos.z)}
+    const now=performance.now();
+    healthZones.forEach(z=>{const dist=Math.hypot(playerPos.x-z.position.x,playerPos.z-z.position.z);if(dist<3.5&&now-lastHealTime>1000){if(playerHealth<100){playerHealth=Math.min(100,playerHealth+5);updateHealthUI();playHealSound();showToast("💚 زيادة الصحة +5%")}lastHealTime=now}});
+    if(!isFrozen){bots.forEach(b=>{if(b.userData.isDead)return;const dx=playerPos.x-b.position.x,dz=playerPos.z-b.position.z,d=Math.hypot(dx,dz);if(d>2.5){b.position.x+=(dx/d)*.035;b.position.z+=(dz/d)*.035;b.rotation.y=Math.atan2(dx,dz);b.userData.animTime+=.15;const swing=Math.sin(b.userData.animTime)*.5;b.userData.lArm.rotation.x=swing;b.userData.rArm.rotation.x=-swing}if(d<12&&performance.now()-b.userData.lastShot>850){b.userData.lastShot=performance.now();if(isReflector)killBot(b);else takeDamage(5)}})}
+  }
+  drawMinimap();renderer.render(scene,camera);
+}
+</script>
+</body>
+</html>
